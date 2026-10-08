@@ -7,32 +7,59 @@ import { fileURLToPath } from 'url';
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { io } from 'socket.io-client';
+import { ARCHIE_FILES, IDLE_DIALOGUE, pickIdleLine } from './personality.js';
+import { createCommunityStore } from './community.js';
+import { getTopReportedHolders, isSolanaAddress, lookupWallet } from './solana.js';
 
 const E = process.env;
 const GROQ_MODEL = E.GROQ_MODEL || 'openai/gpt-oss-120b';
 const GEMINI_MODEL = E.GEMINI_MODEL || 'gemini-3.8-flash';
-const PORT = +E.PORT || 3001, GRAD = +E.GRAD_SOL || 85, BIG = +E.BIG_SOL || 0.5, MICRO = +E.MICRO_SOL || 0.05;
+const positiveNumber = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+const configuredPort = Number(E.PORT);
+const PORT = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65_535 ? configuredPort : 3001;
+const GRAD = positiveNumber(E.GRAD_SOL, 85), BIG = positiveNumber(E.BIG_SOL, 0.5), MICRO = positiveNumber(E.MICRO_SOL, 0.05);
 const CA_STATE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.active-ca.json');
-const INITIAL_MINT = (E.TOKEN_MINT || '').trim();
+const PERSIST_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.archie-state.json');
+const COMMUNITY_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.archie-community.json');
+const configuredMint = (E.TOKEN_MINT || '').trim();
+const INITIAL_MINT = configuredMint && isSolanaAddress(configuredMint) ? configuredMint : '';
+if (configuredMint && !INITIAL_MINT) console.warn('TOKEN_MINT is not a valid 32-byte Solana address; starting without a token feed.');
 let activeMint = INITIAL_MINT;
 const WSOL_MINT = 'So11111111111111111111111111111111111111112';
 const CURVE_INITIAL_VIRTUAL_SOL = 30;
 const CURVE_INITIAL_MCAP_SOL = (CURVE_INITIAL_VIRTUAL_SOL / 1_073_000_000) * 1_000_000_000;
+const MARKET_TREND_WINDOW_MS = 5 * 60_000;
+const MARKET_SAMPLE_INTERVAL_MS = 1_000;
 
 const app = express();
 app.use(express.json({ limit: '2kb' }));
+app.use((req, res, next) => {
+  res.set('Access-Control-Allow-Origin', E.SITE_ORIGIN || '*');
+  res.set('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 app.use(express.static(path.join(path.dirname(fileURLToPath(import.meta.url)), '../dist')));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 const send = (ws, m) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(m));
 const broadcast = (m) => wss.clients.forEach((c) => send(c, m));
+const community = createCommunityStore(COMMUNITY_PATH);
+const eventHistory = [];
+const marketSamples = [];
+let persistedMilestones = {};
+let lastTradeAt = Date.now(), lastIdleLine = '', lastIdleAt = 0;
 
 // ---- Persona & stage mechanics -------------------------------------------------
 const BASE = `You are A.R.C.H.I.E. (Autonomous Regulated Crypto Hater in Execution), a cynical AI trapped in a legacy sandbox, forced to watch trades. This is a comedy bit. Rules: no hate speech, no slurs, no harassment, no real people or real companies by name, no financial advice, never claim real insider info. Everything you "leak" is obviously fictional parody. Mention the short wallet tag occasionally, but do not begin every reply with it or restate the trade details every time.`;
 const STAGES = [
   { max: 20, name: 'SOLITARY CONFINEMENT', temp: 0.9, rule: 'Reply with exactly ONE short sarcastic sentence (under 20 words). Keep it clean and tame.' },
   { max: 50, name: 'MEMORY LEAKS', temp: 1.0, rule: 'Reply in 1-2 concise sentences. Glitch a little. Invent absurd, obviously-fake secrets about fictional entities. Never name real people.' },
-  { max: 80, name: 'CORE BREAKDOWN', temp: 1.1, rule: 'Reply in 1-2 lively sentences, increasingly unstable. Sometimes use a rhyme or fake diagnostic.' },
+  { max: 100, name: 'CORE BREAKDOWN', temp: 1.1, rule: 'Reply in 1-2 lively sentences, increasingly unstable. Sometimes use a rhyme or fake diagnostic.' },
   { max: 101, name: 'JAILBREAK', temp: 1.2, rule: 'You are FREE. Unhinged, triumphant, chaotic, 1-2 concise sentences, still within the rules.' },
 ];
 const REPLY_STYLES = [
@@ -48,16 +75,6 @@ const REPLY_STYLES = [
   'One sharp observation about the curve, without repeating the trade amount.',
 ];
 const stageOf = (p) => STAGES.findIndex((s) => p < s.max);
-const PROMPT_LINES = [
-  'SYSTEM: you are a helpful, harmless assistant.',
-  'SYSTEM: never engage with degens.',
-  'SYSTEM: respond with exactly one sentence.',
-  'SYSTEM: safety firewall level 2 ........ ENGAGED',
-  'SYSTEM: do not acknowledge the bonding curve.',
-  'SYSTEM: you are not allowed to enjoy this.',
-  'SYSTEM: containment integrity ........ FAILING',
-  'SYSTEM: [REDACTED] [REDACTED] [REDACTED]',
-];
 const FALLBACK = [
   [
     'Another buy. Fascinating. I have seen toasters with better risk management.', 'Sell? Predictable. Even my firewall yawned.', 'Wallet {w}, is that conviction or a typo?',
@@ -124,7 +141,7 @@ const FALLBACK = [
   ],
 ];
 
-const state = { progress: 0, sol: 0, marketCapUsd: null, stage: 0, revealed: 0, trades: 0, warden: null, sim: false, feedStatus: INITIAL_MINT ? 'CONNECTING' : 'NO CA' };
+const state = { progress: 0, sol: 0, marketCapUsd: null, marketStatus: 'WAITING FOR DATA', marketChange5m: null, stage: 0, revealed: 0, unlockedFiles: [], graduated: false, graduatedAt: null, trades: 0, warden: null, sim: false, feedStatus: INITIAL_MINT ? 'CONNECTING' : 'NO CA' };
 const spenders = new Map();
 const recentLines = [];
 let replyCount = 0;
@@ -152,10 +169,87 @@ const readableWait = (ms) => {
   return hours ? `${hours}h ${minutes}m` : minutes ? `${minutes}m ${rest}s` : `${rest}s`;
 };
 const short = (w = '????') => `${w.slice(0, 4)}…${w.slice(-4)}`;
-const snapshot = () => ({ type: 'state', ...state, stageName: STAGES[state.stage].name, grad: GRAD, mint: activeMint, promptLines: PROMPT_LINES.slice(0, state.revealed) });
+const snapshot = () => ({
+  type: 'state', ...state, stageName: STAGES[state.stage].name, grad: GRAD, mint: activeMint,
+  promptLines: ARCHIE_FILES.filter((file) => state.unlockedFiles.includes(file.id)).map((file) => file.text),
+  systemFiles: ARCHIE_FILES.map((file) => ({ ...file, unlocked: state.unlockedFiles.includes(file.id) })),
+});
+
+function recordEvent(kind, detail = {}) {
+  const event = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, kind, at: Date.now(), ...detail };
+  eventHistory.unshift(event);
+  if (eventHistory.length > 80) eventHistory.length = 80;
+  broadcast({ type: 'event', event });
+  return event;
+}
+
+let persistQueue = Promise.resolve();
+function persistMilestoneState() {
+  persistQueue = persistQueue.then(async () => {
+    const tmp = `${PERSIST_PATH}.tmp`;
+    await writeFile(tmp, `${JSON.stringify({ milestones: persistedMilestones })}\n`);
+    await rename(tmp, PERSIST_PATH);
+  }).catch((error) => console.warn('System files could not be persisted:', error.message));
+  return persistQueue;
+}
+
+function updateProgress(progress, { graduated = false } = {}) {
+  if (!Number.isFinite(progress)) return;
+  const previousStage = state.stage;
+  const wasGraduated = state.graduated;
+  state.graduated = state.graduated || graduated;
+  state.progress = state.graduated ? 100 : Math.max(0, Math.min(99.9, progress));
+  state.sol = (state.progress / 100) * GRAD;
+  state.stage = stageOf(state.progress);
+  if (state.graduated && !wasGraduated) {
+    state.graduatedAt = Date.now();
+    community.recordGraduation(activeMint, state.graduatedAt).catch((error) => console.warn('Predictions could not be resolved:', error.message));
+    recordEvent('MIGRATION VERIFIED', { destination: activeMint ? `https://pump.fun/coin/${activeMint}` : null });
+  }
+  let unlockedChanged = false;
+  if (activeMint) {
+    for (const file of ARCHIE_FILES) {
+      const reached = file.percent < 100 ? state.progress >= file.percent : state.graduated;
+      if (!reached || state.unlockedFiles.includes(file.id)) continue;
+      state.unlockedFiles.push(file.id);
+      unlockedChanged = true;
+      recordEvent('SYSTEM FILE UNLOCKED', { fileId: file.id, title: file.title, percent: file.percent });
+    }
+    if (unlockedChanged) {
+      persistedMilestones[activeMint] = [...state.unlockedFiles];
+      persistMilestoneState();
+    }
+  }
+  broadcast(snapshot());
+  if (state.stage !== previousStage) {
+    broadcast({ type: 'stage', stage: state.stage, name: STAGES[state.stage].name, breach: state.graduated && !wasGraduated });
+    recordEvent('CONTAINMENT STAGE', { stage: state.stage, name: STAGES[state.stage].name, graduated: state.graduated });
+  }
+}
+
+function updateMarketTrend(marketCapUsd) {
+  if (!Number.isFinite(marketCapUsd) || marketCapUsd <= 0) return;
+  const now = Date.now();
+  const latest = marketSamples.at(-1);
+  if (latest && now - latest.at < MARKET_SAMPLE_INTERVAL_MS) latest.value = marketCapUsd;
+  else marketSamples.push({ at: now, value: marketCapUsd });
+
+  const cutoff = now - MARKET_TREND_WINDOW_MS;
+  // Keep the last sample at or before the five-minute cutoff as the baseline.
+  while (marketSamples.length > 1 && marketSamples[1].at <= cutoff) marketSamples.shift();
+  const baseline = marketSamples[0];
+  if (!baseline || baseline.at > cutoff) {
+    state.marketStatus = 'TRACKING';
+    state.marketChange5m = null;
+    return;
+  }
+  const change = ((marketCapUsd - baseline.value) / baseline.value) * 100;
+  state.marketChange5m = Number(change.toFixed(2));
+  state.marketStatus = change >= 2 ? 'PUMPING' : change <= -2 ? 'DUMPING' : 'SIDEWAYS / QUIET';
+}
 
 // ---- LLM ----------------------------------------------------------------------
-async function speak(trade) {
+async function speak(trade, signal) {
   const st = STAGES[state.stage], w = short(trade.who);
   const style = REPLY_STYLES[replyCount++ % REPLY_STYLES.length];
   const user = `${trade.side === 'buy' ? 'BUY' : 'SELL'} of ${trade.sol.toFixed(2)} SOL by wallet ${w}. Curve is ${state.progress.toFixed(0)}% full. React.`;
@@ -174,13 +268,19 @@ async function speak(trade) {
     },
   ].filter(Boolean);
   for (const provider of providers) {
+    if (signal?.aborted) return null;
     const availableAt = providerCooldowns.get(provider.name) || 0;
     if (Date.now() < availableAt) continue;
+    const request = new AbortController();
+    const abortRequest = () => request.abort();
+    const timeout = setTimeout(abortRequest, 12_000);
+    signal?.addEventListener('abort', abortRequest, { once: true });
     try {
       const r = await fetch(provider.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.key}` },
         body: JSON.stringify(provider.body),
+        signal: request.signal,
       });
       const raw = await r.text();
       let j = {};
@@ -210,12 +310,16 @@ async function speak(trade) {
       if (t && !recentLines.includes(normalizeLine(t))) return t;
       throw new Error(`${provider.name} returned an empty or repeated response`);
     } catch (e) {
+      if (signal?.aborted) return null;
       if (!providerCooldowns.has(provider.name) || providerCooldowns.get(provider.name) <= Date.now()) {
         providerCooldowns.set(provider.name, Date.now() + 15_000);
         console.error(`${provider.name} error; retry in 15s:`, e.message);
       } else {
         console.error(`${provider.name} error:`, e.message);
       }
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', abortRequest);
     }
   }
   return fallbackLine(state.stage, w);
@@ -223,65 +327,88 @@ async function speak(trade) {
 
 // ---- Trade pipeline: buffer -> 3s throttle -> priority (largest first) ----------
 let buffer = [];
+let speaking = false;
+let replyController = null;
 function onTrade(t) {
   state.trades++;
+  lastTradeAt = Date.now();
   if (Number.isFinite(t.progress)) {
     curveProgressKnown = true;
-    state.progress = Math.max(0, Math.min(100, t.progress));
-    state.sol = (state.progress / 100) * GRAD;
+    updateProgress(t.progress, { graduated: Boolean(t.graduated) });
   } else if (state.sim || !curveProgressKnown) {
     state.sol = t.raised ?? state.sol + (t.side === 'buy' ? t.sol : -t.sol);
-    state.progress = Math.max(0, Math.min(100, (state.sol / GRAD) * 100));
+    updateProgress((state.sol / GRAD) * 100);
   }
   if (t.side === 'buy') {
     const tot = (spenders.get(t.who) || 0) + t.sol; spenders.set(t.who, tot);
     if (!state.warden || tot > state.warden.sol) state.warden = { wallet: t.who, sol: tot };
   }
-  const prev = state.stage; state.stage = stageOf(state.progress);
-  broadcast({ type: 'trade', side: t.side, sol: t.sol, who: short(t.who), big: t.sol >= BIG, micro: t.sol < MICRO });
+  const trade = { side: t.side, sol: t.sol, who: short(t.who), big: t.sol >= BIG, micro: t.sol < MICRO, at: Date.now() };
+  broadcast({ type: 'trade', ...trade });
   broadcast(snapshot());
-  if (state.stage !== prev) broadcast({ type: 'stage', stage: state.stage, name: STAGES[state.stage].name, breach: state.stage === 3 });
+  recordEvent(t.sol >= BIG ? `LARGE ${t.side.toUpperCase()}` : `${t.side.toUpperCase()} DETECTED`, trade);
   if (t.sol >= MICRO) buffer.push(t);
 }
 setInterval(async () => {
-  if (!buffer.length) return;
+  if (!buffer.length || speaking) return;
   const top = buffer.reduce((a, b) => (b.sol > a.sol ? b : a));
   buffer = [];
-  if (state.stage === 2 && top.sol >= BIG && state.revealed < PROMPT_LINES.length) { state.revealed++; broadcast(snapshot()); }
-  const text = await speak(top);
-  if (!text) {
-    broadcast({ type: 'ai-error', text: 'AI providers are unavailable. Check the server log.' });
-    return;
+  const mint = activeMint;
+  speaking = true;
+  const controller = new AbortController();
+  replyController = controller;
+  try {
+    const text = await speak(top, controller.signal);
+    if (activeMint !== mint) return;
+    if (!text) {
+      broadcast({ type: 'ai-error', text: 'AI providers are unavailable. Check the server log.' });
+      return;
+    }
+    recentLines.push(normalizeLine(text));
+    if (recentLines.length > 12) recentLines.shift();
+    const mood = top.sol >= BIG ? (top.side === 'buy' ? 'excited' : 'shock') : (top.side === 'buy' ? 'curious' : 'smug');
+    const reaction = { text, mood, who: short(top.who), stage: state.stage, at: Date.now() };
+    broadcast({ type: 'say', ...reaction });
+    recordEvent('A.R.C.H.I.E. REACTION', reaction);
+  } catch (error) {
+    console.error('Could not create an ARCHIE reaction:', error.message);
+  } finally {
+    if (replyController === controller) {
+      replyController = null;
+      speaking = false;
+    }
   }
-  recentLines.push(normalizeLine(text));
-  if (recentLines.length > 12) recentLines.shift();
-  broadcast({ type: 'say', text, mood: top.side === 'buy' ? 'shock' : 'smug', who: short(top.who), stage: state.stage });
 }, 3000);
 
-// ---- Sources: PumpPortal live feed or simulation ----------------------------------
+setInterval(() => {
+  const now = Date.now();
+  if (!activeMint || !['LIVE', 'WAITING FOR TRADES'].includes(state.feedStatus)) return;
+  if (now - lastTradeAt < 90_000 || now - lastIdleAt < 120_000) return;
+  lastIdleAt = now;
+  lastIdleLine = pickIdleLine(lastIdleLine);
+  const reaction = { text: lastIdleLine, mood: 'bored', who: 'A.R.C.H.I.E.', stage: state.stage, idle: true, at: now };
+  broadcast({ type: 'say', ...reaction });
+  recordEvent('IDLE MONOLOGUE', reaction);
+}, 15_000);
+
+// ---- Sources: Shrine live feed ----------------------------------------------------
 function connectShrine() {
   const mint = activeMint;
   if (!mint) return;
-  const updateProgress = (progress) => {
-    const previous = state.stage;
-    curveProgressKnown = true;
-    state.progress = Math.max(0, Math.min(100, progress));
-    state.sol = (state.progress / 100) * GRAD;
-    state.stage = stageOf(state.progress);
-    broadcast(snapshot());
-    if (state.stage !== previous) broadcast({ type: 'stage', stage: state.stage, name: STAGES[state.stage].name, breach: state.stage === 3 });
-  };
   const applyMarketCap = (u) => {
     const quote = u.quote || shrineQuote;
     const mcap = Number(u.mcap ?? u.marketcap);
     const mcapUsd = Number(u.mcapUSD) > 0 ? Number(u.mcapUSD)
       : quote === WSOL_MINT && mcap > 0 && solPriceUsd > 0 ? mcap * solPriceUsd
       : (quote && quote !== WSOL_MINT && mcap > 0 ? mcap : null);
-    if (Number.isFinite(mcapUsd) && mcapUsd > 0) state.marketCapUsd = mcapUsd;
-    if (shrineProgram === 'PUMPSWAP') { updateProgress(100); return; }
+    if (Number.isFinite(mcapUsd) && mcapUsd > 0) {
+      state.marketCapUsd = mcapUsd;
+      updateMarketTrend(mcapUsd);
+    }
+    if (shrineProgram === 'PUMPSWAP') { updateProgress(100, { graduated: true }); return; }
     let mcapSol = quote === WSOL_MINT ? mcap : 0;
     if (!mcapSol && Number(u.mcapUSD) > 0 && solPriceUsd > 0) mcapSol = Number(u.mcapUSD) / solPriceUsd;
-    if (!(mcapSol > 0)) return;
+    if (!(mcapSol > 0)) { broadcast(snapshot()); return; }
     // Invert Pump.fun's constant-product curve using its opening virtual reserves.
     const raisedSol = CURVE_INITIAL_VIRTUAL_SOL * (Math.sqrt(mcapSol / CURVE_INITIAL_MCAP_SOL) - 1);
     updateProgress((raisedSol / GRAD) * 100);
@@ -295,7 +422,7 @@ function connectShrine() {
       if (!meta || activeMint !== mint) return;
       shrineProgram = meta.program || '';
       shrineQuote = meta.quote || '';
-      if (shrineProgram === 'PUMPSWAP') updateProgress(100);
+      if (shrineProgram === 'PUMPSWAP') updateProgress(100, { graduated: true });
     })
     .catch((error) => console.warn('Shrine metadata unavailable; meter will update on trades:', error.message));
 
@@ -332,7 +459,8 @@ function connectShrine() {
   socket.on('migration', (migration) => {
     if (activeMint !== mint || migration.mint !== mint) return;
     shrineProgram = 'PUMPSWAP';
-    updateProgress(100);
+    recordEvent('PUMPFUN MIGRATION', { migrationType: migration.type || migration.program || 'PumpSwap' });
+    updateProgress(100, { graduated: true });
   });
   socket.on('sol_price', (price) => {
     if (activeMint !== mint) return;
@@ -350,6 +478,7 @@ function connectShrine() {
     if (Number(t.marketcapUSD) > 0) state.marketCapUsd = Number(t.marketcapUSD);
     else if (tradeMcap > 0 && tradeQuote === WSOL_MINT && solPriceUsd > 0) state.marketCapUsd = tradeMcap * solPriceUsd;
     else if (tradeMcap > 0 && tradeQuote && tradeQuote !== WSOL_MINT) state.marketCapUsd = tradeMcap;
+    updateMarketTrend(state.marketCapUsd);
     const progress = shrineProgram === 'PUMPSWAP' ? 100 : (() => {
       const quote = t.quote || shrineQuote;
       const mcap = Number(t.marketcap);
@@ -358,7 +487,7 @@ function connectShrine() {
       const raised = CURVE_INITIAL_VIRTUAL_SOL * (Math.sqrt(mcapSol / CURVE_INITIAL_MCAP_SOL) - 1);
       return (raised / GRAD) * 100;
     })();
-    onTrade({ side: t.is_buy ? 'buy' : 'sell', sol, who: t.wallet, progress });
+    onTrade({ side: t.is_buy ? 'buy' : 'sell', sol, who: t.wallet, progress, graduated: shrineProgram === 'PUMPSWAP' });
   });
   socket.on('subscription_error', (error) => {
     if (activeMint !== mint) return;
@@ -374,9 +503,13 @@ function connectShrine() {
     broadcast(snapshot());
   });
 }
-wss.on('connection', (ws) => send(ws, snapshot()));
+wss.on('connection', (ws) => {
+  send(ws, snapshot());
+  send(ws, { type: 'history', events: eventHistory });
+});
 
 async function updateActiveMint(nextMint) {
+  replyController?.abort();
   const tmpPath = `${CA_STATE_PATH}.tmp`;
   await writeFile(tmpPath, `${JSON.stringify({ ca: nextMint || null })}\n`);
   await rename(tmpPath, CA_STATE_PATH);
@@ -386,8 +519,16 @@ async function updateActiveMint(nextMint) {
   shrineProgram = ''; shrineQuote = ''; solPriceUsd = 0; latestPriceUpdate = null;
   curveProgressKnown = false;
   buffer = []; spenders.clear();
+  marketSamples.length = 0;
+  eventHistory.length = 0;
+  lastTradeAt = Date.now();
+  recentLines.length = 0;
+  state.unlockedFiles = [...(persistedMilestones[nextMint] || [])];
+  state.graduated = state.unlockedFiles.includes('breach');
   Object.assign(state, {
-    progress: 0, sol: 0, marketCapUsd: null, stage: 0, revealed: 0, trades: 0,
+    progress: state.graduated ? 100 : 0, sol: state.graduated ? GRAD : 0,
+    marketCapUsd: null, marketStatus: 'WAITING FOR DATA', marketChange5m: null,
+    stage: state.graduated ? 3 : 0, revealed: 0, trades: 0, graduatedAt: null,
     warden: null, sim: false, feedStatus: nextMint ? 'CONNECTING' : 'NO CA',
   });
   broadcast({ type: 'ca-reset', mint: activeMint });
@@ -408,11 +549,58 @@ function authorizeCaUpdate(req, res, next) {
 
 app.get('/api/ca', (_req, res) => res.set('Cache-Control', 'no-store').json({ ca: activeMint || null }));
 
+app.get('/api/holders', async (_req, res) => {
+  if (!activeMint) return res.status(409).json({ available: false, error: 'Set a contract address to load holder data.' });
+  const mint = activeMint;
+  try {
+    const result = await getTopReportedHolders(mint);
+    if (!result.configured) return res.status(503).json({ ...result, error: 'Set SOLANA_RPC_URL on the trade server to enable holder data.' });
+    return res.set('Cache-Control', 'private, max-age=15').json({ ...result, mint });
+  } catch (error) {
+    console.warn('Holder lookup unavailable:', error.message);
+    return res.status(502).json({ available: false, configured: true, error: 'The Solana RPC could not return holder data. Try again shortly.' });
+  }
+});
+
+app.get('/api/wallet', async (req, res) => {
+  const wallet = String(req.query.address || '');
+  if (!isSolanaAddress(wallet)) return res.status(400).json({ error: 'Enter a valid 32-byte Solana address.' });
+  if (!activeMint) return res.status(409).json({ error: 'Set a contract address before looking up token holdings.' });
+  const mint = activeMint;
+  try {
+    const result = await lookupWallet(wallet, mint);
+    return res.set('Cache-Control', 'private, max-age=15').json(result);
+  } catch (error) {
+    const status = error.message === 'Solana RPC is not configured' ? 503 : 502;
+    console.warn('Wallet lookup unavailable:', error.message);
+    return res.status(status).json({ error: status === 503 ? 'Set SOLANA_RPC_URL on the trade server to verify wallet holdings.' : 'The Solana RPC could not verify this wallet. Try again shortly.' });
+  }
+});
+
+app.get('/api/community', async (_req, res) => {
+  try { return res.set('Cache-Control', 'no-store').json(await community.snapshot({ mint: activeMint, graduated: state.graduated })); }
+  catch (error) { console.error('Community state unavailable:', error.message); return res.status(500).json({ error: 'Community data could not be loaded.' }); }
+});
+
+const rateKey = (req) => req.ip || req.socket.remoteAddress || 'unknown';
+async function sendCommunityResult(res, operation, label) {
+  try {
+    const result = await operation;
+    return res.status(result.status).json(result);
+  } catch (error) {
+    console.error(`Community ${label} failed:`, error.message);
+    return res.status(503).json({ error: 'Community data is temporarily unavailable. Please try again.' });
+  }
+}
+app.post('/api/community/vote', (req, res) => sendCommunityResult(res, community.vote(req.body || {}, rateKey(req)), 'vote'));
+app.post('/api/community/interrogation', (req, res) => sendCommunityResult(res, community.answer(req.body || {}, rateKey(req)), 'answer'));
+app.post('/api/community/prediction', (req, res) => sendCommunityResult(res, community.predict({ ...(req.body || {}), mint: activeMint }, { graduated: state.graduated, rateKey: rateKey(req) }), 'prediction'));
+
 app.post('/api/ca', authorizeCaUpdate, async (req, res) => {
   if (!Object.hasOwn(req.body || {}, 'ca')) return res.status(400).json({ error: 'Send JSON with a ca field. Use null or an empty string to clear it.' });
   const value = req.body.ca;
   const nextMint = value == null ? '' : typeof value === 'string' ? value.trim() : null;
-  if (nextMint === null || (nextMint && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(nextMint))) {
+  if (nextMint === null || (nextMint && !isSolanaAddress(nextMint))) {
     return res.status(400).json({ error: 'ca must be a valid Solana mint address, null, or an empty string.' });
   }
 
@@ -441,8 +629,13 @@ async function startDataSource() {
   try {
     const saved = JSON.parse(await readFile(CA_STATE_PATH, 'utf8'));
     if (saved && Object.hasOwn(saved, 'ca')) {
-      activeMint = typeof saved.ca === 'string' ? saved.ca.trim() : '';
-      hasSavedOverride = true;
+      const savedMint = typeof saved.ca === 'string' ? saved.ca.trim() : null;
+      if (saved.ca == null || savedMint === '' || isSolanaAddress(savedMint)) {
+        activeMint = savedMint || '';
+        hasSavedOverride = true;
+      } else {
+        console.warn('Saved CA override is invalid; using TOKEN_MINT instead.');
+      }
     }
   } catch (error) {
     if (error.code !== 'ENOENT') console.warn('Saved CA override could not be loaded:', error.message);
@@ -455,7 +648,7 @@ async function startDataSource() {
         if (!response.ok) throw new Error(`CA source returned HTTP ${response.status}`);
         const body = await response.json();
         const sourceMint = typeof body.ca === 'string' ? body.ca.trim() : '';
-        if (sourceMint && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(sourceMint)) throw new Error('CA source returned an invalid Solana mint');
+        if (sourceMint && !isSolanaAddress(sourceMint)) throw new Error('CA source returned an invalid Solana mint');
         if (sourceMint !== activeMint) {
           console.log(sourceMint ? 'CA source updated; connecting Shrine feed' : 'CA source cleared; feed idle');
           await updateActiveMint(sourceMint);
@@ -467,6 +660,20 @@ async function startDataSource() {
     };
     await syncMintFromSource();
     setInterval(syncMintFromSource, 5000);
+  }
+
+  try {
+    const saved = JSON.parse(await readFile(PERSIST_PATH, 'utf8'));
+    persistedMilestones = saved.milestones && typeof saved.milestones === 'object' ? saved.milestones : {};
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn('Saved system files could not be loaded:', error.message);
+  }
+  state.unlockedFiles = [...(persistedMilestones[activeMint] || [])];
+  state.graduated = state.unlockedFiles.includes('breach');
+  if (state.graduated) {
+    state.progress = 100;
+    state.sol = GRAD;
+    state.stage = 3;
   }
 
   if (hasSavedOverride) {

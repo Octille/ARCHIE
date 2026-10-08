@@ -4,5 +4,7 @@ dist/
 .netlify/
 .active-ca.json
 .active-ca.json.tmp
-.active-ca.json
-.active-ca.json.tmp
+.archie-state.json
+.archie-state.json.tmp
+.archie-community.json
+.archie-community.json.tmp

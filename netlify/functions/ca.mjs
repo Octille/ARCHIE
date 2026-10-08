@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { getStore } from '@netlify/blobs';
+import { isSolanaAddress } from '../../shared/solanaAddress.js';
 
 export const config = { path: '/api/ca' };
 
@@ -40,7 +41,7 @@ export default async (request) => {
     if (!Object.hasOwn(body || {}, 'ca')) return json({ error: 'Send a JSON body with a ca field.' }, 400);
     if (body.ca != null && typeof body.ca !== 'string') return json({ error: 'ca must be a valid Solana mint address or null.' }, 400);
     ca = (body.ca || '').trim();
-    if (ca && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(ca)) {
+    if (ca && !isSolanaAddress(ca)) {
       return json({ error: 'ca must be a valid Solana mint address, null, or an empty string.' }, 400);
     }
   }
