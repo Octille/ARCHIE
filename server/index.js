@@ -558,7 +558,7 @@ app.get('/api/holders', async (_req, res) => {
     return res.set('Cache-Control', 'private, max-age=15').json({ ...result, mint });
   } catch (error) {
     console.warn('Holder lookup unavailable:', error.message);
-    return res.status(502).json({ available: false, configured: true, error: 'The Solana RPC could not return holder data. Try again shortly.' });
+    return res.status(503).json({ available: false, configured: true, error: 'Holder data is unavailable because the configured RPC providers are rate-limiting or blocking this server. Configure a private Solana RPC URL to restore refreshes.' });
   }
 });
 
@@ -573,7 +573,7 @@ app.get('/api/wallet', async (req, res) => {
   } catch (error) {
     const status = error.message === 'Solana RPC is not configured' ? 503 : 502;
     console.warn('Wallet lookup unavailable:', error.message);
-    return res.status(status).json({ error: status === 503 ? 'Set SOLANA_RPC_URL on the trade server to verify wallet holdings.' : 'The Solana RPC could not verify this wallet. Try again shortly.' });
+    return res.status(status).json({ error: status === 503 ? 'Set SOLANA_RPC_URL on the trade server to verify wallet holdings.' : 'Wallet lookup is unavailable because the configured RPC providers are rate-limiting or blocking this server. Configure a private Solana RPC URL to restore lookups.' });
   }
 });
 

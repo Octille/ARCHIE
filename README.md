@@ -22,7 +22,7 @@ Open `http://localhost:5173`. Vite serves the UI and proxies `/api` and `/ws` to
 - **AI dialogue:** if `GROQ_API_KEY` or `GEMINI_API_KEY` is configured, the backend requests short character reactions. Without provider keys, it uses the built-in scripted dialogue. The character content is fictional parody.
 - **Community store:** poll votes, daily riddle answers, prediction points, and graduation times are saved to `.archie-community.json`. The one-per-browser controls use a local browser ID, not a verified identity; these casual features are not secure governance or Sybil-resistant scoring. Prediction points have no monetary value or prize.
 - **Milestone store:** unlocked file IDs are saved in `.archie-state.json`, keyed by mint. The event timeline and trade/session warden are held in memory and reset when the active mint changes or the server restarts.
-- **Wallet/RPC tools:** the API key is server-side in `SOLANA_RPC_URL`; it is never sent to the browser. RPC calls read current balances and a partial largest-account sample.
+- **Wallet/RPC tools:** `SOLANA_RPC_URL` stays server-side and is never sent to the browser. Holder and wallet reads try it first, then use `SOLANA_RPC_FALLBACK_URL` (default: PublicNode) if it fails. Rate-limited or blocked endpoints enter cooldown to avoid repeated requests. Holder requests are deduplicated and cached; if providers fail after a successful read, the last sample can be served as stale for up to 15 minutes. Public RPCs are shared and can still be rate-limited; use a private provider URL for production traffic.
 
 ## Data limits and display rules
 
@@ -41,7 +41,8 @@ Open `http://localhost:5173`. Vite serves the UI and proxies `/api` and `/ws` to
 | `GRAD_SOL` | Express server | Approximate Pump.fun progress target in SOL; defaults to `85`. |
 | `BIG_SOL` | Express server | Large-trade emotional reaction threshold; defaults to `0.5`. |
 | `MICRO_SOL` | Express server | Minimum trade size queued for AI dialogue; defaults to `0.05`. |
-| `SOLANA_RPC_URL` | Express server | Optional Solana JSON-RPC endpoint for holder and wallet snapshots. |
+| `SOLANA_RPC_URL` | Express server | Optional primary Solana JSON-RPC endpoint for holder and wallet snapshots. |
+| `SOLANA_RPC_FALLBACK_URL` | Express server | Optional fallback endpoint; defaults to `https://solana-rpc.publicnode.com`. |
 | `SITE_ORIGIN` | Express server | Allowed browser origin for the Express API/WebSocket deployment; defaults to `*`. Set to the deployed site origin when hosting separately. |
 | `CA_UPDATE_TOKEN` | Express server and Netlify function | Bearer secret protecting contract-address updates. Use the same secret in both places if both endpoints are used. |
 | `CA_SOURCE_URL` | Express server | Optional JSON endpoint that returns `{ "ca": "..." }`; commonly the static site's `/api/ca` function. |

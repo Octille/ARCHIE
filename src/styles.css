@@ -108,11 +108,15 @@ main{flex:initial;min-height:660px;grid-template-columns:minmax(280px,320px) min
 .wallet-form input,.inline-form input,.inline-form select{flex:1;min-width:0;border:1px solid rgba(93,255,154,.27);border-radius:2px;background:#050d08;color:#dcf3e1;padding:10px;font:11px 'IBM Plex Mono',monospace;outline:none}
 .wallet-form input:focus,.inline-form input:focus,.inline-form select:focus{border-color:var(--fg);box-shadow:0 0 0 2px rgba(93,255,154,.09)}
 .wallet-form input::placeholder,.inline-form input::placeholder{color:#597260}
-.mugshot{display:grid;grid-template-columns:58px minmax(0,1fr);gap:12px;align-items:start;padding:13px;margin:12px 0;border:1px solid rgba(255,194,74,.3);background:linear-gradient(110deg,rgba(40,31,15,.24),rgba(6,17,10,.5))}
-.mugshot-avatar{width:54px;height:54px;display:grid;place-items:center;border:1px solid var(--amber);border-radius:15px;color:var(--amber);font-size:31px;box-shadow:0 0 18px rgba(255,194,74,.1)}
-.mugshot h3{margin:3px 0;color:#effff2;font-size:14px}
-.mugshot p{margin:4px 0;color:#b0c8b5;font-size:10px;line-height:1.5}
-.mugshot .feature-button{grid-column:1/-1;justify-self:start}
+.mugshot{display:grid;grid-template-columns:minmax(230px,.72fr) minmax(0,1.28fr);gap:clamp(16px,2.5vw,30px);align-items:center;padding:clamp(14px,2vw,24px);margin:12px 0;border:1px solid rgba(255,194,74,.3);border-radius:6px;background:radial-gradient(ellipse at 78% 50%,rgba(55,156,85,.09),transparent 45%),linear-gradient(110deg,rgba(40,31,15,.2),rgba(6,17,10,.5))}
+.mugshot-info{min-width:0}
+.mugshot-copy{min-width:0}
+.mugshot h3{margin:6px 0;color:#effff2;font-size:15px;overflow-wrap:anywhere}
+.mugshot p{margin:6px 0;color:#b0c8b5;font-size:10px;line-height:1.6}
+.mugshot-card{display:grid;gap:9px;min-width:0}
+.mugshot-card>.eyebrow{color:#84b992;font-size:8px;letter-spacing:.16em}
+.mugshot-card-preview{display:block;width:100%;height:auto;border:1px solid rgba(138,239,157,.32);border-radius:8px;background:#050907;box-shadow:0 12px 30px rgba(0,0,0,.3),0 0 24px rgba(80,223,121,.06)}
+.mugshot .feature-button{justify-self:start;margin-top:2px}
 .community-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .mini-module{padding:13px;border:1px solid rgba(93,255,154,.16);background:rgba(2,9,5,.4);min-width:0}
 .question{min-height:40px;color:#d9eadc;font-size:12px;line-height:1.5}
@@ -163,6 +167,31 @@ footer{border-top:1px solid rgba(93,255,154,.14);padding:13px 4px 4px;line-heigh
 @media(max-width:1000px){main{grid-template-columns:minmax(260px,38%) 1fr;min-height:0}.meter{grid-column:1/-1;min-height:260px;display:grid;grid-template-columns:1fr auto;align-items:center}.meter .bar{grid-row:2/5;grid-column:1;width:100%;min-height:18px;height:18px;flex:none;margin:4px 0}.meter .bar i{height:100%!important;width:0}.meter .mk{display:none}.meter .pct{grid-row:2;grid-column:2;font-size:30px}.meter h3:nth-of-type(2),.meter .prompt{grid-column:1/-1}.feature-grid{grid-template-columns:1fr 1fr}.file-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:700px){.screen{padding:10px}.screen>header{align-items:flex-start}.screen>header b{font-size:25px}.screen>header span{flex:1 1 calc(100% - 170px);font-size:12px}.screen>header em{order:3;flex:1 1 auto;margin:0;font-size:11px}.sound-toggle{order:4}.launchbar{gap:9px;padding:10px}.token-mark{min-width:72px}.contract{flex:1 1 calc(100% - 90px)}.market-cap{flex:1;min-width:105px}.market-cap strong{font-size:22px}.copy-ca,.buy-link{flex:1;text-align:center;padding:9px 5px;font-size:10px}.brief{padding:13px 52px 13px 13px}.brief .steps{font-size:11px}.steps li{margin-bottom:7px}.tape-panel{height:auto;min-height:64px;padding:9px}.tape{gap:14px}.ladder{grid-template-columns:1fr 1fr;gap:6px}.ladder div{font-size:10px;padding:8px}main{display:flex;flex-direction:column;gap:10px;margin:10px 0}.face{min-height:0;overflow:visible}.term{min-height:260px;max-height:360px}.meter{min-height:0;padding:14px;display:flex;align-items:stretch}.meter .bar{width:100%;height:16px;min-height:16px;flex:none;order:1}.meter .bar i{height:100%!important;width:var(--meter-width,0)}.meter .pct{order:2;align-self:flex-end;margin-top:-34px;font-size:28px}.meter h3:nth-of-type(2){margin-top:22px}.prompt{max-height:115px}.facility-strip{align-items:flex-start;flex-wrap:wrap;gap:8px 14px;padding:12px}.facility-strip>div{min-width:0;flex:1}.facility-strip p{flex:1 1 100%;order:3}.facility-strip>.feature-button{padding:7px;font-size:9px}.feature-card{padding:13px;margin-bottom:10px}.feature-heading h2{font-size:24px}.file-grid{grid-template-columns:1fr 1fr}.file-item{min-height:166px;padding:9px}.file-item h3{font-size:10px}.file-item p{font-size:9px}.feature-grid,.community-grid{grid-template-columns:1fr}.mini-module{padding:12px}.question{min-height:0}.event-row{grid-template-columns:60px minmax(94px,auto) minmax(0,1fr);gap:6px;font-size:9px}.event-row time{font-size:8px}.event-row b{font-size:8px}.replay-banner{grid-template-columns:1fr;gap:5px}.activity-actions{justify-content:flex-end}.activity-actions .text-button{padding:6px;font-size:8px}.holder-list li{grid-template-columns:22px minmax(0,1fr) 72px 82px;gap:5px;padding:8px 0;font-size:9px}.holder-list em{font-size:7px}.wallet-form{flex-wrap:wrap}.wallet-form input{flex-basis:100%}.wallet-form button{flex:1}.mugshot{grid-template-columns:44px minmax(0,1fr);padding:10px;gap:9px}.mugshot-avatar{width:42px;height:42px}.mugshot .feature-button{font-size:9px}.record-control{align-items:flex-start}.record-control .feature-button,.record-stop{width:100%}.status-tag{font-size:8px}.history-limit{font-size:9px}.boot h1{font-size:58px}.boot p{font-size:12px}.breach-card .feature-button{flex:1}}
 @media(max-width:380px){.file-grid{grid-template-columns:1fr}.file-item{min-height:0}.feature-heading{align-items:flex-start}.feature-heading .status-tag{white-space:normal;text-align:right}.holder-list li{grid-template-columns:20px minmax(0,1fr) 57px 67px}.holder-list code{font-size:9px}}
+/* Keep the token identity, contract and market cap in separate layout tracks. */
+.launchbar{display:grid;grid-template-columns:max-content minmax(150px,1fr) minmax(135px,max-content) max-content max-content;column-gap:14px;row-gap:10px;}
+.token-mark{grid-column:1;min-width:105px}
+.contract{grid-column:2;}
+.market-cap{grid-column:3;min-width:135px;padding-left:14px;border-left:1px solid rgba(93,255,154,.18);align-self:stretch;justify-content:center;}
+.copy-ca{grid-column:4;}
+.launchbar>.buy-link{grid-column:5;}
+.buy-guide{grid-column:1/-1;width:100%;min-width:0;}
+@media(max-width:1000px) and (min-width:701px){
+  .launchbar{grid-template-columns:max-content minmax(100px,1fr) minmax(120px,max-content) max-content;column-gap:10px;}
+  .token-mark{grid-row:1;}
+  .contract{grid-row:1;}
+  .market-cap{grid-row:1;min-width:120px;padding-left:10px;}
+  .copy-ca{grid-row:1;}
+  .launchbar>.buy-link{grid-column:2/-1;grid-row:2;justify-self:start;}
+}
+@media(max-width:700px){
+  .launchbar{grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:10px;row-gap:10px;}
+  .token-mark{grid-column:1;grid-row:1;min-width:0;}
+  .market-cap{grid-column:2;grid-row:1;min-width:0;padding:0;border:0;align-items:flex-end;text-align:right;}
+  .contract{grid-column:1/-1;grid-row:2;padding-top:8px;border-top:1px solid rgba(93,255,154,.14);}
+  .copy-ca{grid-column:1;grid-row:3;}
+  .launchbar>.buy-link{grid-column:2;grid-row:3;}
+  .buy-guide{grid-column:1/-1;grid-row:4;}
+}
 /* Hand-built 3D containment cell and draggable camera */
 .cell-viewport{position:relative;isolation:isolate;width:100%;height:560px;flex:0 0 560px;overflow:hidden;border:1px solid rgba(125,220,145,.24);border-radius:15px;background:radial-gradient(ellipse at 50% 44%,rgba(41,99,55,.25),transparent 54%),linear-gradient(165deg,#0c1a10,#030806 78%);perspective:950px;perspective-origin:50% 43%;touch-action:none;cursor:grab;box-shadow:inset 0 1px rgba(255,255,255,.07),inset 0 -20px 40px rgba(0,0,0,.4),0 12px 32px rgba(0,0,0,.28)}
 .cell-viewport:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
@@ -208,3 +237,4 @@ footer{border-top:1px solid rgba(93,255,154,.14);padding:13px 4px 4px;line-heigh
 @media(max-width:700px){.scene-debug-wrap{top:8px;right:8px}.scene-debug{width:min(220px,74vw);gap:7px;padding:9px}.scene-debug-toggle{padding:6px 7px}.scene-subtitle-fallback{bottom:51px;width:78%;font-size:9px}}
 @media(prefers-reduced-motion:reduce){.speech-caret{animation:none}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
+@media(max-width:700px){.mugshot{grid-template-columns:minmax(0,1fr);gap:14px;padding:13px}.mugshot-card{gap:8px}.mugshot .feature-button{font-size:9px}}

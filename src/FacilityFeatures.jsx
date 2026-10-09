@@ -25,16 +25,63 @@ const getClientId = () => {
   } catch { return memoryClientId ||= newClientId(); }
 };
 const fmt = (value) => Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
+const isCardAddress = (value = '') => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value.trim());
+const svgText = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character]);
 const eventLabel = (event = {}) => event.text || (Number.isFinite(event.sol) ? `${String(event.side || 'trade').toUpperCase()} ${Number(event.sol).toFixed(2)} SOL · ${event.who || 'wallet unknown'}` : event.title || event.migrationType || event.name || event.who || event.destination || event.fileId || 'Verified live event');
 
-function CardDownload({ wallet, amount, rank, mint }) {
+function CardDownload({ wallet, amount, rank, mint, verified = false }) {
+  const id = svgText(short(wallet || 'VISITOR'));
+  const balance = verified ? `${fmt(amount)} $${TOKEN_SYMBOL}${rank ? ` · RANK ${rank}` : ' · CURRENT BALANCE'}` : 'ON-CHAIN BALANCE NOT VERIFIED';
+  const record = verified ? 'LIVE RPC SNAPSHOT' : 'UNVERIFIED VISITOR RECORD';
+  const tokenMint = mint ? `MINT ${short(mint)}` : 'ARCHIE CONTAINMENT TERMINAL';
+  const state = verified ? 'VERIFIED SNAPSHOT' : 'UNVERIFIED RECORD';
+  const captured = new Date().toISOString().slice(0, 10);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+    <defs>
+      <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#10291d"/><stop offset=".58" stop-color="#07140e"/><stop offset="1" stop-color="#030805"/></linearGradient>
+      <radialGradient id="glow"><stop stop-color="#36b867" stop-opacity=".25"/><stop offset="1" stop-color="#36b867" stop-opacity="0"/></radialGradient>
+      <linearGradient id="face" x2="0" y2="1"><stop stop-color="#14271c"/><stop offset="1" stop-color="#050b07"/></linearGradient>
+      <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#74d892" stroke-opacity=".035"/></pattern>
+    </defs>
+    <rect width="1200" height="630" rx="28" fill="url(#bg)"/>
+    <rect width="1200" height="630" rx="28" fill="url(#grid)"/>
+    <circle cx="1000" cy="305" r="335" fill="url(#glow)"/>
+    <rect x="30" y="30" width="1140" height="570" rx="22" fill="none" stroke="#7bdf99" stroke-opacity=".46" stroke-width="2"/>
+    <path d="M72 144H1128" stroke="#70c989" stroke-opacity=".3"/>
+    <rect x="72" y="66" width="42" height="42" rx="11" fill="#122a1c" stroke="#64dc89" stroke-opacity=".7"/>
+    <text x="93" y="95" fill="#ffc35c" text-anchor="middle" font-family="monospace" font-size="23" font-weight="700">A</text>
+    <text x="132" y="84" fill="#ffc35c" font-family="monospace" font-size="19" letter-spacing="4">A.R.C.H.I.E.</text>
+    <text x="132" y="109" fill="#8ba995" font-family="monospace" font-size="12" letter-spacing="2">FACILITY PERSONNEL FILE</text>
+    <rect x="852" y="70" width="276" height="38" rx="19" fill="#10271a" stroke="#73d992" stroke-opacity=".4"/>
+    <circle cx="874" cy="89" r="4" fill="${verified ? '#72ee97' : '#ffc35c'}"/>
+    <text x="890" y="94" fill="${verified ? '#a4f4b8' : '#ffd477'}" font-family="monospace" font-size="12" letter-spacing="1.5">${svgText(state)}</text>
+    <text x="78" y="198" fill="#7dbb8d" font-family="monospace" font-size="13" letter-spacing="3">SUBJECT WALLET</text>
+    <text x="76" y="278" fill="#e7f8eb" font-family="monospace" font-size="68" font-weight="700" letter-spacing="-2">${id}</text>
+    <text x="78" y="330" fill="#7dbb8d" font-family="monospace" font-size="13" letter-spacing="3">TOKEN RECORD</text>
+    <text x="78" y="373" fill="${verified ? '#76efa0' : '#ffc35c'}" font-family="monospace" font-size="24" font-weight="700">${svgText(balance)}</text>
+    <path d="M78 414H760" stroke="#70c989" stroke-opacity=".24"/>
+    <text x="78" y="454" fill="#769783" font-family="monospace" font-size="11" letter-spacing="2">MINT</text>
+    <text x="78" y="480" fill="#f5c86c" font-family="monospace" font-size="17">${svgText(tokenMint)}</text>
+    <text x="460" y="454" fill="#769783" font-family="monospace" font-size="11" letter-spacing="2">RECORD DATE</text>
+    <text x="460" y="480" fill="#b2cbb8" font-family="monospace" font-size="17">${captured}</text>
+    <text x="78" y="548" fill="#688272" font-family="monospace" font-size="12" letter-spacing="1.4">${svgText(record)} · NOT AN ENDORSEMENT</text>
+    <circle cx="977" cy="326" r="145" fill="none" stroke="#7de49a" stroke-opacity=".12" stroke-width="2"/>
+    <circle cx="977" cy="326" r="128" fill="none" stroke="#7de49a" stroke-opacity=".2" stroke-dasharray="2 11" stroke-width="2"/>
+    <path d="M977 205V177" stroke="#8df1a5" stroke-width="6" stroke-linecap="round"/><circle cx="977" cy="168" r="11" fill="#ffc35c" stroke="#ffe29b" stroke-width="3"/>
+    <rect x="875" y="218" width="204" height="210" rx="54" fill="url(#face)" stroke="#85eda1" stroke-width="5"/>
+    <path d="M917 281Q936 264 955 279M999 279Q1018 264 1037 281" fill="none" stroke="#81d997" stroke-width="6" stroke-linecap="round"/>
+    <ellipse cx="936" cy="307" rx="16" ry="21" fill="#ffc35c"/><ellipse cx="1018" cy="307" rx="16" ry="21" fill="#ffc35c"/>
+    <circle cx="941" cy="303" r="5" fill="#fff1ca"/><circle cx="1023" cy="303" r="5" fill="#fff1ca"/>
+    <path d="M944 358Q977 395 1010 358" fill="none" stroke="#78ee9c" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="892" cy="395" r="5" fill="#ffc35c"/><circle cx="1062" cy="395" r="5" fill="#6dea91"/>
+  </svg>`;
+  const preview = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   const downloadCard = () => {
-    const id = short(wallet || 'VISITOR');
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#143324"/><stop offset="1" stop-color="#050907"/></linearGradient><radialGradient id="r"><stop stop-color="#52e985" stop-opacity=".3"/><stop offset="1" stop-color="#52e985" stop-opacity="0"/></radialGradient></defs><rect width="1200" height="630" rx="32" fill="url(#g)"/><circle cx="920" cy="260" r="360" fill="url(#r)"/><rect x="36" y="36" width="1128" height="558" rx="26" fill="none" stroke="#56e988" stroke-opacity=".45" stroke-width="2"/><text x="78" y="112" fill="#ffc35c" font-family="monospace" font-size="27" letter-spacing="8">A.R.C.H.I.E. // FACILITY RECORD</text><text x="78" y="258" fill="#e7ffec" font-family="monospace" font-weight="700" font-size="82">${id}</text><text x="80" y="326" fill="#6cff9b" font-family="monospace" font-size="30">${wallet ? `${fmt(amount)} $${TOKEN_SYMBOL} · ${rank ? `RANK ${rank}` : 'VISITOR'}` : 'VISITOR CARD'}</text><text x="80" y="502" fill="#a0c7ac" font-family="monospace" font-size="22">ON-CHAIN SNAPSHOT · ${new Date().toISOString().slice(0, 10)} · NOT AN ENDORSEMENT</text><text x="80" y="550" fill="#ffc35c" font-family="monospace" font-size="20">${mint ? `MINT ${short(mint)}` : 'ARCHIE CONTAINMENT TERMINAL'}</text><g transform="translate(918 165)"><rect width="168" height="168" rx="40" fill="#07110b" stroke="#8bffac" stroke-width="6"/><circle cx="53" cy="72" r="20" fill="#ffbd4f"/><circle cx="115" cy="72" r="20" fill="#ffbd4f"/><path d="M58 119q26 34 52 0" fill="none" stroke="#75ff9b" stroke-width="8" stroke-linecap="round"/></g></svg>`;
     const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
-    const link = document.createElement('a'); link.href = url; link.download = 'archie-facility-card.svg'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const filename = `archie-mugshot-${wallet ? wallet.slice(0, 5) : 'visitor'}.svg`;
+    const link = document.createElement('a'); link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  return <button className="feature-button" onClick={downloadCard}>DOWNLOAD MUGSHOT CARD</button>;
+  return <><img className="mugshot-card-preview" src={preview} alt={`${verified ? 'Verified snapshot' : 'Unverified'} ARCHIE mugshot card for ${short(wallet || 'visitor')}`}/><button type="button" className="feature-button" onClick={downloadCard}>DOWNLOAD ID CARD ↗</button></>;
 }
 
 function Holders({ mint }) {
@@ -59,7 +106,7 @@ function Holders({ mint }) {
     {error && <p className="feature-error">{error}</p>}
     {!error && !data?.holders?.length && <p className="empty-state">{busy ? 'Reading the ledger…' : 'No holder sample available yet.'}</p>}
     {!!data?.holders?.length && <ol className="holder-list">{data.holders.map((holder) => <li key={holder.wallet}><b>{String(holder.rank).padStart(2, '0')}</b><code title={holder.wallet}>{short(holder.wallet)}</code><span>{fmt(holder.amount)}</span><em>{holder.title}</em></li>)}</ol>}
-    {data?.fetchedAt && <small className="dim">Showing grouped owners from {data.sampleSize} top accounts · token units · read {new Date(data.fetchedAt).toLocaleTimeString()}</small>}
+    {data?.fetchedAt && <small className="dim">{data.stale ? 'RPC unavailable · showing last successful sample' : 'Showing grouped owners'} from {data.sampleSize} top accounts · token units · read {new Date(data.fetchedAt).toLocaleTimeString()}</small>}
   </section>;
 }
 
@@ -156,7 +203,16 @@ function WalletLookup({ mint }) {
     <form className="wallet-form" onSubmit={submit}><input value={address} onChange={(event) => { setAddress(event.target.value); setResult(null); setError(''); }} placeholder="Solana wallet address" autoComplete="off" spellCheck="false" aria-label="Solana wallet address"/><button className="feature-button" disabled={busy || !mint}>{busy ? 'CHECKING…' : 'LOOK UP'}</button></form>
     {!mint && <p className="dim">A token address is required for a verified balance lookup.</p>}
     {error && <p className="feature-error">{error}</p>}
-    {result && <div className="mugshot"><div className="mugshot-avatar" aria-hidden="true">{result.hasBalance ? '◉' : '○'}</div><div><span className="eyebrow">{result.title} {result.rank ? `· RANK ${result.rank}` : ''}</span><h3>{short(result.wallet)}</h3><p>{result.hasBalance ? `${fmt(result.amount)} tokens in current RPC snapshot` : 'No current balance found for this mint.'}</p><p className="dim">{result.holdDurationAvailable ? `Holding since ${result.holdDuration}` : 'Hold duration unavailable: current RPC balance does not include acquisition history.'}</p></div><CardDownload wallet={result.wallet} amount={result.amount} rank={result.rank} mint={result.mint}/></div>}
+    {result && <div className="mugshot">
+      <div className="mugshot-info">
+        <div className="mugshot-copy"><span className="eyebrow">{result.title} {result.rank ? `· RANK ${result.rank}` : ''}</span><h3>{short(result.wallet)}</h3><p>{result.hasBalance ? `${fmt(result.amount)} tokens in current RPC snapshot` : 'No current balance found for this mint.'}</p><p className="dim">{result.holdDurationAvailable ? `Holding since ${result.holdDuration}` : 'Hold duration unavailable: current RPC balance does not include acquisition history.'}</p>{!result.leaderboardAvailable && <p className="dim">Holder rank is temporarily unavailable from the configured RPC.</p>}</div>
+      </div>
+      <div className="mugshot-card"><span className="eyebrow">FACILITY ID CARD</span><CardDownload wallet={result.wallet} amount={result.amount} rank={result.rank} mint={result.mint} verified={result.verified}/></div>
+    </div>}
+    {!result && isCardAddress(address) && <div className="mugshot">
+      <div className="mugshot-info"><div className="mugshot-copy"><span className="eyebrow">UNVERIFIED VISITOR</span><h3>{short(address.trim())}</h3><p>RPC data is unavailable; this card includes no verified balance or rank.</p></div></div>
+      <div className="mugshot-card"><span className="eyebrow">FACILITY ID CARD</span><CardDownload wallet={address.trim()} mint={mint}/></div>
+    </div>}
     <p className="data-note">Reads current token accounts via the configured Solana RPC. A balance does not prove when tokens were acquired or whether a wallet sold earlier.</p>
   </section>;
 }
